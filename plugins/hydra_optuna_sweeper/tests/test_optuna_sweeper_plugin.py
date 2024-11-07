@@ -23,6 +23,7 @@ from optuna.distributions import (
     FloatDistribution,
 )
 from optuna.samplers import RandomSampler
+from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
 from pytest import mark, warns
 
 from hydra_plugins.hydra_optuna_sweeper import _impl
@@ -47,6 +48,15 @@ def check_distribution(expected: BaseDistribution, actual: BaseDistribution) -> 
     assert isinstance(actual, CategoricalDistribution)
     # shuffle() will randomize the order of items in choices.
     assert set(expected.choices) == set(actual.choices)
+
+
+def check_pruner(expected: BasePruner, actual: BasePruner) -> None:
+    if isinstance(expected, NopPruner):
+        assert type(expected) == type(actual)
+        assert actual
+        assert expected
+    else:
+        assert type(expected) == type(actual)
 
 
 @mark.parametrize(
@@ -80,6 +90,42 @@ def check_distribution(expected: BaseDistribution, actual: BaseDistribution) -> 
 def test_create_optuna_distribution_from_config(input: Any, expected: Any) -> None:
     actual = _impl.create_optuna_distribution_from_config(input)
     check_distribution(expected, actual)
+
+
+@mark.parametrize(
+    "input, expected",
+    [
+        (
+            {"type": "nop"},
+            NopPruner(),
+        ),
+        (
+            {
+                "type": "median",
+                "n_startup_trials": 5,
+                "n_warmup_steps": 0,
+                "interval_steps": 1,
+                "n_min_trials": 1,
+            },
+            MedianPruner(
+                n_startup_trials=5, n_warmup_steps=0, interval_steps=1, n_min_trials=1
+            ),
+        ),
+        (
+            {
+                "type": "hyperband",
+                "min_resource": 1,
+                "max_resource": "auto",
+                "reduction_factor": 3,
+                "bootstrap_count": 0,
+            },
+            HyperbandPruner(1, "auto", 3, 0),
+        ),
+    ],
+)
+def test_create_optuna_pruner_from_config(input: Any, expected: Any) -> None:
+    actual = _impl.create_optuna_pruner_from_config(input)
+    check_pruner(expected, actual)
 
 
 @mark.parametrize(
@@ -329,6 +375,7 @@ def test_warnings(
         n_jobs=1,
         max_failure_rate=0.0,
         custom_search_space=None,
+        pruner=None,
     )
     if search_space is not None:
         search_space = OmegaConf.create(search_space)

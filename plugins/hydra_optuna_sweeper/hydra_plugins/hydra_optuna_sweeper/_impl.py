@@ -42,11 +42,36 @@ from optuna.distributions import (
     IntDistribution,
     FloatDistribution,
 )
+from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
 from optuna.trial import Trial
 
-from .config import Direction, DistributionConfig, DistributionType
+from .config import (
+    Direction,
+    DistributionConfig,
+    DistributionType,
+    PrunerConfig,
+    PrunerType,
+)
 
 log = logging.getLogger(__name__)
+
+
+def create_optuna_pruner_from_config(config: MutableMapping[str, Any]) -> BasePruner:
+    kwargs = dict(config)
+    if isinstance(config["type"], str):
+        kwargs["type"] = PrunerType[config["type"]]
+    param = PrunerConfig(**kwargs)
+    if param.type == PrunerType.nop:
+        return NopPruner()
+    if param.type == PrunerType.median:
+        assert param.n_startup_trials is not None
+        assert param.n_warmup_steps is not None
+        assert param.interval_steps is not None
+        assert param.n_min_trials is not None
+        return MedianPruner(n_startup_trials=int(param.n_startup_trials))
+    if param.type == PrunerType.hyperband:
+        return HyperbandPruner()
+    raise NotImplementedError(f"{param.type} is not supported by Optuna sweeper.")
 
 
 def create_optuna_distribution_from_config(
@@ -144,19 +169,22 @@ def create_params_from_overrides(
             fixed_params[param_name] = value
     return search_space_distributions, fixed_params
 
+
 def create_optuna_trial_override(trial, dir: str):
-    with NamedTemporaryFile(delete=False, dir=dir, prefix='optuna_trial_') as f:
+    with NamedTemporaryFile(delete=False, dir=dir, prefix="optuna_trial_") as f:
         pickle.dump(trial, f)
         fname = f.name
 
-    return {'+trial': '{'
-        '_target_:pickle.load,'
-        'file:{'
-            '_target_:io.open,'
-            'mode:rb,'
-            f'file:{fname}'
-        '}}'
+    return {
+        "+trial": "{"
+        "_target_:pickle.load,"
+        "file:{"
+        "_target_:io.open,"
+        "mode:rb,"
+        f"file:{fname}"
+        "}}"
     }
+
 
 class OptunaSweeperImpl(Sweeper):
     def __init__(
@@ -355,7 +383,7 @@ class OptunaSweeperImpl(Sweeper):
         batch_size = self.n_jobs
         n_trials_to_go = self.n_trials
 
-        #TODO: Parallel execution
+        # TODO: Parallel execution
         # Parallel(n_jobs=self.n_jobs, prefer='threads', require='sharedmem')(
         #     delayed(self.__run_trial)(
         #         study=study,
@@ -480,10 +508,14 @@ class OptunaSweeperImpl(Sweeper):
 
         try:
             try:
-                values = [float(v) for v in (
-                    [returns.return_value] if len(directions=1)
-                    else returns.return_value
-                )]
+                values = [
+                    float(v)
+                    for v in (
+                        [returns.return_value]
+                        if len(directions=1)
+                        else returns.return_value
+                    )
+                ]
             except (ValueError, TypeError):
                 raise ValueError(
                     "Return value(s) must be float-castable,"

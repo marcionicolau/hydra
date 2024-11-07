@@ -27,7 +27,7 @@ setup(
         "Development Status :: 4 - Beta",
     ],
     install_requires=[
-        "hydra-core>=1.1.0.dev7",
+        "hydra-core==1.3.2",
         "optuna>=3.0.0",
         "joblib",
     ],

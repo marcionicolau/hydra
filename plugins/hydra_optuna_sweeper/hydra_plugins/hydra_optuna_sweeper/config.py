@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
@@ -18,14 +18,21 @@ class Direction(Enum):
     maximize = 2
 
 
+class PrunerType(Enum):
+    nop = 1
+    median = 2
+    hyperband = 3
+
+
 @dataclass
 class HyperbandPrunerConfig:
     _target_: str = "optuna.pruners.HyperbandPruner"
 
     min_resource: int = 1
-    max_resource: str = 'auto' # Union[str, int]
+    max_resource: str = "auto"  # Union[str, int]
     reduction_factor: int = 3
     bootstrap_count: int = 0
+
 
 @dataclass
 class MedianPrunerConfig:
@@ -35,6 +42,7 @@ class MedianPrunerConfig:
     n_warmup_steps: int = 0
     interval_steps: int = 1
     n_min_trials: int = 1
+
 
 @dataclass
 class NopPrunerConfig:
@@ -161,6 +169,28 @@ class DistributionConfig:
     # Discritization step
     # Valid for int or float distribution
     step: Optional[float] = None
+
+
+@dataclass
+class PrunerConfig:
+    # Type of pruner. "nop", "median" or "hyperband"
+    type: PrunerType
+
+    min_resource: Optional[int] = None
+
+    max_resource: Optional[Union[str, int]] = None
+
+    reduction_factor: Optional[int] = None
+
+    bootstrap_count: Optional[int] = None
+
+    n_startup_trials: Optional[int] = None
+
+    n_warmup_steps: Optional[int] = None
+
+    interval_steps: Optional[int] = None
+
+    n_min_trials: Optional[int] = None
 
 
 defaults = [{"sampler": "tpe"}]
