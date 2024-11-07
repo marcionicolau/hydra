@@ -2,6 +2,9 @@
 import functools
 import logging
 import sys
+import pickle
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 import warnings
 from textwrap import dedent
 from typing import (
@@ -16,6 +19,7 @@ from typing import (
     Tuple,
 )
 
+from joblib import Parallel, delayed
 import optuna
 from hydra._internal.deprecation_warning import deprecation_warning
 from hydra.core.override_parser.overrides_parser import OverridesParser
@@ -140,6 +144,19 @@ def create_params_from_overrides(
             fixed_params[param_name] = value
     return search_space_distributions, fixed_params
 
+def create_optuna_trial_override(trial, dir: str):
+    with NamedTemporaryFile(delete=False, dir=dir, prefix='optuna_trial_') as f:
+        pickle.dump(trial, f)
+        fname = f.name
+
+    return {'+trial': '{'
+        '_target_:pickle.load,'
+        'file:{'
+            '_target_:io.open,'
+            'mode:rb,'
+            f'file:{fname}'
+        '}}'
+    }
 
 class OptunaSweeperImpl(Sweeper):
     def __init__(
@@ -154,6 +171,7 @@ class OptunaSweeperImpl(Sweeper):
         search_space: Optional[DictConfig],
         custom_search_space: Optional[str],
         params: Optional[DictConfig],
+        pruner: Optional[Any],
     ) -> None:
         self.sampler = sampler
         self.direction = direction
@@ -173,6 +191,7 @@ class OptunaSweeperImpl(Sweeper):
         self.params = params
         self.job_idx: int = 0
         self.search_space_distributions: Optional[Dict[str, BaseDistribution]] = None
+        self.pruner = pruner if pruner is not None else optuna.pruners.NopPruner()
 
     def _process_searchspace_config(self) -> None:
         url = "https://hydra.cc/docs/upgrades/1.1_to_1.2/changes_to_sweeper_config/"
@@ -326,6 +345,7 @@ class OptunaSweeperImpl(Sweeper):
             sampler=self.sampler,
             directions=directions,
             load_if_exists=True,
+            pruner=self.pruner,
         )
         log.info(f"Study name: {study.study_name}")
         log.info(f"Storage: {self.storage}")
@@ -334,6 +354,17 @@ class OptunaSweeperImpl(Sweeper):
 
         batch_size = self.n_jobs
         n_trials_to_go = self.n_trials
+
+        #TODO: Parallel execution
+        # Parallel(n_jobs=self.n_jobs, prefer='threads', require='sharedmem')(
+        #     delayed(self.__run_trial)(
+        #         study=study,
+        #         search_space=search_space,
+        #         fixed_params=fixed_params,
+        #         directions=directions,
+        #         job_id=i
+        #     ) for i in range(self.n_trials)
+        # )
 
         while n_trials_to_go > 0:
             batch_size = min(n_trials_to_go, batch_size)
@@ -427,3 +458,50 @@ class OptunaSweeperImpl(Sweeper):
             OmegaConf.create(results_to_serialize),
             f"{self.config.hydra.sweep.dir}/optimization_results.yaml",
         )
+
+    def __run_trial(self, study, search_space, fixed_params, directions, job_id):
+        self.job_idx += 1
+
+        trial = study.ask()
+        overrides = []
+        for param_name, distribution in search_space.items():
+            trial._suggest(param_name, distribution)
+
+        params = dict(trial.params)
+        params.update(fixed_params)
+        params.update(create_optuna_trial_override(trial, dir=self.sweep_dir))
+
+        overrides.append(tuple(f"{name}={val}" for name, val in params.items()))
+
+        returns = self.launcher.launch(overrides, initial_job_idx=job_id)[0]
+
+        values: Optional[List[float]] = None
+        state: optuna.trial.TrialState = optuna.trial.TrialState.COMPLETE
+
+        try:
+            try:
+                values = [float(v) for v in (
+                    [returns.return_value] if len(directions=1)
+                    else returns.return_value
+                )]
+            except (ValueError, TypeError):
+                raise ValueError(
+                    "Return value(s) must be float-castable,"
+                    " and a sequence if multiple objectives are used."
+                    f" Got '{returns.return_value}'."
+                ).with_traceback(sys.exc_info()[2])
+
+            if len(values) != len(directions):
+                raise ValueError(
+                    "The number of the values and the number of the objectives are"
+                    f" mismatched. Expect {len(directions)}, but actually {len(values)}."
+                )
+        except optuna.exceptions.TrialPruned:
+            log.info(f"Trial {job_id} pruned")
+            state = optuna.trial.TrialState.PRUNED
+        except Exception as e:
+            state = optuna.trial.TrialState.FAIL
+            log.info(f"Trial {job_id} failed, reason: {e}")
+            log.debug("", exc_info=1)
+        finally:
+            study.tell(trial=trial, state=state, values=values)
