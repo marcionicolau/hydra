@@ -19,6 +19,29 @@ class Direction(Enum):
 
 
 @dataclass
+class HyperbandPrunerConfig:
+    _target_: str = "optuna.pruners.HyperbandPruner"
+
+    min_resource: int = 1
+    max_resource: str = 'auto' # Union[str, int]
+    reduction_factor: int = 3
+    bootstrap_count: int = 0
+
+@dataclass
+class MedianPrunerConfig:
+    _target_: str = "optuna.pruners.MedianPruner"
+
+    n_startup_trials: int = 5
+    n_warmup_steps: int = 0
+    interval_steps: int = 1
+    n_min_trials: int = 1
+
+@dataclass
+class NopPrunerConfig:
+    _target_: str = "optuna.pruners.NopPruner"
+
+
+@dataclass
 class SamplerConfig:
     _target_: str = MISSING
 
@@ -185,6 +208,8 @@ class OptunaSweeperConf:
     # https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/002_configurations.html
     custom_search_space: Optional[str] = None
 
+    pruner: Optional[Dict[str, Any]] = None
+
 
 ConfigStore.instance().store(
     group="hydra/sweeper",
@@ -232,5 +257,26 @@ ConfigStore.instance().store(
     group="hydra/sweeper/sampler",
     name="grid",
     node=GridSamplerConfig,
+    provider="optuna_sweeper",
+)
+
+ConfigStore.instance().store(
+    group="hydra/sweeper/pruner",
+    name="hyperband",
+    node=HyperbandPrunerConfig,
+    provider="optuna_sweeper",
+)
+
+ConfigStore.instance().store(
+    group="hydra/sweeper/pruner",
+    name="median",
+    node=MedianPrunerConfig,
+    provider="optuna_sweeper",
+)
+
+ConfigStore.instance().store(
+    group="hydra/sweeper/pruner",
+    name="nop",
+    node=NopPrunerConfig,
     provider="optuna_sweeper",
 )

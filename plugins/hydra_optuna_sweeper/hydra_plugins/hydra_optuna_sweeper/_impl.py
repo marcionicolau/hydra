@@ -171,7 +171,7 @@ class OptunaSweeperImpl(Sweeper):
         search_space: Optional[DictConfig],
         custom_search_space: Optional[str],
         params: Optional[DictConfig],
-        pruner: Optional[Any],
+        pruner: Optional[optuna.pruners.BasePruner],
     ) -> None:
         self.sampler = sampler
         self.direction = direction

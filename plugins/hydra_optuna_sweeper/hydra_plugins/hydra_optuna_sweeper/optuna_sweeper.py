@@ -1,6 +1,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 from typing import Any, List, Optional
 
+import optuna
+
 from hydra.plugins.sweeper import Sweeper
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig
@@ -23,6 +25,7 @@ class OptunaSweeper(Sweeper):
         search_space: Optional[DictConfig],
         custom_search_space: Optional[str],
         params: Optional[DictConfig],
+        pruner: Optional[optuna.pruners.BasePruner],
     ) -> None:
         from ._impl import OptunaSweeperImpl
 
@@ -37,6 +40,7 @@ class OptunaSweeper(Sweeper):
             search_space,
             custom_search_space,
             params,
+            pruner,
         )
 
     def setup(
