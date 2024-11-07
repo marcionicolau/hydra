@@ -268,8 +268,8 @@ class OptunaSweeperImpl(Sweeper):
             n_items = (distribution.high - distribution.low) // distribution.step
             return [distribution.low + i * distribution.step for i in range(n_items)]
         elif isinstance(distribution, FloatDistribution):
-            n_items = int((distribution.high - distribution.low) // distribution.q)
-            return [distribution.low + i * distribution.q for i in range(n_items)]
+            n_items = int((distribution.high - distribution.low) // distribution.step)
+            return [distribution.low + i * distribution.step for i in range(n_items)]
         else:
             raise ValueError("GridSampler only supports discrete distributions.")
 
