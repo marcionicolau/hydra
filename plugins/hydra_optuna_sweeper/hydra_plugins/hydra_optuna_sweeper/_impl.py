@@ -1,11 +1,10 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import functools
 import logging
-import sys
 import pickle
-from pathlib import Path
-from tempfile import NamedTemporaryFile
+import sys
 import warnings
+from tempfile import NamedTemporaryFile
 from textwrap import dedent
 from typing import (
     Any,
@@ -19,8 +18,19 @@ from typing import (
     Tuple,
 )
 
-from joblib import Parallel, delayed
 import optuna
+from joblib import Parallel, delayed
+from omegaconf import DictConfig, OmegaConf
+from optuna.distributions import (
+    BaseDistribution,
+    CategoricalChoiceType,
+    CategoricalDistribution,
+    IntDistribution,
+    FloatDistribution,
+)
+from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
+from optuna.trial import Trial
+
 from hydra._internal.deprecation_warning import deprecation_warning
 from hydra.core.override_parser.overrides_parser import OverridesParser
 from hydra.core.override_parser.types import (
@@ -34,17 +44,6 @@ from hydra.core.plugins import Plugins
 from hydra.plugins.sweeper import Sweeper
 from hydra.types import HydraContext, TaskFunction
 from hydra.utils import get_method
-from omegaconf import DictConfig, OmegaConf
-from optuna.distributions import (
-    BaseDistribution,
-    CategoricalChoiceType,
-    CategoricalDistribution,
-    IntDistribution,
-    FloatDistribution,
-)
-from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
-from optuna.trial import Trial
-
 from .config import (
     Direction,
     DistributionConfig,
@@ -378,6 +377,7 @@ class OptunaSweeperImpl(Sweeper):
         log.info(f"Study name: {study.study_name}")
         log.info(f"Storage: {self.storage}")
         log.info(f"Sampler: {type(self.sampler).__name__}")
+        log.info(f"Pruner: {type(self.pruner).__name__}")
         log.info(f"Directions: {directions}")
 
         batch_size = self.n_jobs
@@ -393,6 +393,16 @@ class OptunaSweeperImpl(Sweeper):
         #         job_id=i
         #     ) for i in range(self.n_trials)
         # )
+        Parallel(n_jobs=self.n_jobs, prefer="threads", require="sharedmem")(
+            delayed(self.__run_single_trial)(
+                study=study,
+                search_space_distributions=search_space_distributions,
+                fixed_params=fixed_params,
+                directions=directions,
+                job_id=jid,
+            )
+            for jid in range(self.n_trials)
+        )
 
         while n_trials_to_go > 0:
             batch_size = min(n_trials_to_go, batch_size)
@@ -537,3 +547,91 @@ class OptunaSweeperImpl(Sweeper):
             log.debug("", exc_info=1)
         finally:
             study.tell(trial=trial, state=state, values=values)
+
+    def __run_single_trial(
+        self,
+        study,
+        search_space_distributions: Dict[str, BaseDistribution],
+        fixed_params: Dict[str, Any],
+        directions: List[str],
+        job_id: int,
+    ):
+        trial = study.ask()
+        overrides = []
+        for param_name, distribution in search_space_distributions.items():
+            trial._suggest(param_name, distribution)
+
+        params: Dict[str, Any] = dict(trial.params)
+        params.update(fixed_params)
+        params.update(create_optuna_trial_override(trial, dir=self.sweep_dir))
+
+        overrides.append(tuple(f"{name}={val}" for name, val in params.items()))
+
+        log.info(overrides)
+
+
+# while n_trials_to_go > 0:
+#             batch_size = min(n_trials_to_go, batch_size)
+
+#             trials = [study.ask() for _ in range(batch_size)]
+#             overrides = self._configure_trials(
+#                 trials, search_space_distributions, fixed_params
+#             )
+
+#             returns = self.launcher.launch(overrides, initial_job_idx=self.job_idx)
+#             self.job_idx += len(returns)
+#             failures = []
+#             for trial, ret in zip(trials, returns):
+#                 values: Optional[List[float]] = None
+#                 state: optuna.trial.TrialState = optuna.trial.TrialState.COMPLETE
+#                 try:
+#                     if len(directions) == 1:
+#                         try:
+#                             values = [float(ret.return_value)]
+#                         except (ValueError, TypeError):
+#                             raise ValueError(
+#                                 f"Return value must be float-castable. Got '{ret.return_value}'."
+#                             ).with_traceback(sys.exc_info()[2])
+#                     else:
+#                         try:
+#                             values = [float(v) for v in ret.return_value]
+#                         except (ValueError, TypeError):
+#                             raise ValueError(
+#                                 "Return value must be a list or tuple of float-castable values."
+#                                 f" Got '{ret.return_value}'."
+#                             ).with_traceback(sys.exc_info()[2])
+#                         if len(values) != len(directions):
+#                             raise ValueError(
+#                                 "The number of the values and the number of the objectives are"
+#                                 f" mismatched. Expect {len(directions)}, but actually {len(values)}."
+#                             )
+
+#                     try:
+#                         study.tell(trial=trial, state=state, values=values)
+#                     except RuntimeError as e:
+#                         if (
+#                             is_grid_sampler
+#                             and "`Study.stop` is supposed to be invoked inside an objective function or a callback."
+#                             in str(e)
+#                         ):
+#                             pass
+#                         else:
+#                             raise e
+
+#                 except Exception as e:
+#                     state = optuna.trial.TrialState.FAIL
+#                     study.tell(trial=trial, state=state, values=values)
+#                     log.warning(f"Failed experiment: {e}")
+#                     failures.append(e)
+
+#             # raise if too many failures
+#             if len(failures) / len(returns) > self.max_failure_rate:
+#                 log.error(
+#                     f"Failed {failures} times out of {len(returns)} "
+#                     f"with max_failure_rate={self.max_failure_rate}."
+#                 )
+#                 assert len(failures) > 0
+#                 for ret in returns:
+#                     ret.return_value  # delegate raising to JobReturn, with actual traceback
+
+#             n_trials_to_go -= batch_size

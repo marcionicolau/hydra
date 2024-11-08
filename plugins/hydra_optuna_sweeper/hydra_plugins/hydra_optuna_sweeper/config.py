@@ -3,8 +3,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
+
+from hydra.core.config_store import ConfigStore
 
 
 class DistributionType(Enum):
@@ -25,8 +26,31 @@ class PrunerType(Enum):
 
 
 @dataclass
-class HyperbandPrunerConfig:
+class PrunerConfig:
+    _target_: str = MISSING
+    type: PrunerType = MISSING
+
+    min_resource: Optional[int] = None
+
+    max_resource: Optional[Union[str, int]] = None
+
+    reduction_factor: Optional[int] = None
+
+    bootstrap_count: Optional[int] = None
+
+    n_startup_trials: Optional[int] = None
+
+    n_warmup_steps: Optional[int] = None
+
+    interval_steps: Optional[int] = None
+
+    n_min_trials: Optional[int] = None
+
+
+@dataclass
+class HyperbandPrunerConfig(PrunerConfig):
     _target_: str = "optuna.pruners.HyperbandPruner"
+    type: PrunerType = PrunerType.hyperband
 
     min_resource: int = 1
     max_resource: str = "auto"  # Union[str, int]
@@ -35,8 +59,9 @@ class HyperbandPrunerConfig:
 
 
 @dataclass
-class MedianPrunerConfig:
+class MedianPrunerConfig(PrunerConfig):
     _target_: str = "optuna.pruners.MedianPruner"
+    type: PrunerType = PrunerType.median
 
     n_startup_trials: int = 5
     n_warmup_steps: int = 0
@@ -45,8 +70,9 @@ class MedianPrunerConfig:
 
 
 @dataclass
-class NopPrunerConfig:
+class NopPrunerConfig(PrunerConfig):
     _target_: str = "optuna.pruners.NopPruner"
+    type: PrunerType = PrunerType.nop
 
 
 @dataclass
@@ -171,29 +197,29 @@ class DistributionConfig:
     step: Optional[float] = None
 
 
-@dataclass
-class PrunerConfig:
-    # Type of pruner. "nop", "median" or "hyperband"
-    type: PrunerType
+# @dataclass
+# class PrunerConfig:
+#     # Type of pruner. "nop", "median" or "hyperband"
+#     type: PrunerType
+#
+#     min_resource: Optional[int] = None
+#
+#     max_resource: Optional[Union[str, int]] = None
+#
+#     reduction_factor: Optional[int] = None
+#
+#     bootstrap_count: Optional[int] = None
+#
+#     n_startup_trials: Optional[int] = None
+#
+#     n_warmup_steps: Optional[int] = None
+#
+#     interval_steps: Optional[int] = None
+#
+#     n_min_trials: Optional[int] = None
 
-    min_resource: Optional[int] = None
 
-    max_resource: Optional[Union[str, int]] = None
-
-    reduction_factor: Optional[int] = None
-
-    bootstrap_count: Optional[int] = None
-
-    n_startup_trials: Optional[int] = None
-
-    n_warmup_steps: Optional[int] = None
-
-    interval_steps: Optional[int] = None
-
-    n_min_trials: Optional[int] = None
-
-
-defaults = [{"sampler": "tpe"}]
+defaults = [{"sampler": "tpe"}, {"pruner": "nop"}]
 
 
 @dataclass
@@ -238,7 +264,9 @@ class OptunaSweeperConf:
     # https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/002_configurations.html
     custom_search_space: Optional[str] = None
 
-    pruner: Optional[Dict[str, Any]] = None
+    # pruner: Optional[Dict[str, Any]] = None
+    # pruner: PrunerConfig = MISSING
+    pruner: Optional[PrunerConfig] = None
 
 
 ConfigStore.instance().store(

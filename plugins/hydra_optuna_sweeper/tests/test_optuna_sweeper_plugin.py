@@ -6,6 +6,21 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 import optuna
+from hydra_plugins.hydra_optuna_sweeper import _impl
+from hydra_plugins.hydra_optuna_sweeper._impl import OptunaSweeperImpl
+from hydra_plugins.hydra_optuna_sweeper.config import Direction
+from hydra_plugins.hydra_optuna_sweeper.optuna_sweeper import OptunaSweeper
+from omegaconf import DictConfig, OmegaConf
+from optuna.distributions import (
+    BaseDistribution,
+    CategoricalDistribution,
+    IntDistribution,
+    FloatDistribution,
+)
+from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
+from optuna.samplers import RandomSampler
+from pytest import mark, warns
+
 from hydra.core.override_parser.overrides_parser import OverridesParser
 from hydra.core.plugins import Plugins
 from hydra.plugins.sweeper import Sweeper
@@ -15,21 +30,6 @@ from hydra.test_utils.test_utils import (
     run_process,
     run_python_script,
 )
-from omegaconf import DictConfig, OmegaConf
-from optuna.distributions import (
-    BaseDistribution,
-    CategoricalDistribution,
-    IntDistribution,
-    FloatDistribution,
-)
-from optuna.samplers import RandomSampler
-from optuna.pruners import BasePruner, NopPruner, MedianPruner, HyperbandPruner
-from pytest import mark, warns
-
-from hydra_plugins.hydra_optuna_sweeper import _impl
-from hydra_plugins.hydra_optuna_sweeper._impl import OptunaSweeperImpl
-from hydra_plugins.hydra_optuna_sweeper.config import Direction
-from hydra_plugins.hydra_optuna_sweeper.optuna_sweeper import OptunaSweeper
 
 chdir_plugin_root()
 
@@ -185,9 +185,11 @@ def test_launch_jobs(hydra_sweep_runner: TSweepRunner) -> None:
         task_function=None,
         overrides=[
             "hydra/sweeper=optuna",
+            # "+hydra/sweeper/pruner=median",
             "hydra/launcher=basic",
             "hydra.sweeper.n_trials=8",
             "hydra.sweeper.n_jobs=3",
+            # "hydra.sweeper.pruner.bootstrap_count=1",
         ],
     )
     with sweep:
@@ -207,6 +209,7 @@ def test_optuna_example(with_commandline: bool, tmpdir: Path) -> None:
         "hydra.sweeper.n_jobs=1",
         f"hydra.sweeper.storage={storage}",
         f"hydra.sweeper.study_name={study_name}",
+        # "hydra/sweeper/pruner=median",
         "hydra/sweeper/sampler=tpe",
         "hydra.sweeper.sampler.seed=123",
         "~z",
